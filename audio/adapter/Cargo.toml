@@ -1,0 +1,20 @@
+[package]
+name = "adapter"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "adapter"
+path = "src/lib.rs"
+
+[[bin]]
+name = "adapter"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.75"
+cpal = "0.15.2"
+crossbeam = "0.8.2"
+parking_lot = "0.12.1"
+rubato = "0.14.1"
