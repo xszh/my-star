@@ -1,1 +1,2 @@
-mod recorder;
+pub mod record;
+pub mod resample;
