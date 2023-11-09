@@ -3,20 +3,6 @@
 version = 3
 
 [[package]]
-name = "adapter"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "byteorder",
- "cpal",
- "crossbeam",
- "ipmb",
- "num_enum 0.7.1",
- "parking_lot",
- "rubato",
-]
-
-[[package]]
 name = "aho-corasick"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -52,6 +38,20 @@ name = "anyhow"
 version = "1.0.75"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4668cab20f66d8d020e1fbc0ebe47217433c1b6c8f2040faf858554e394ace6"
+
+[[package]]
+name = "audio_adapter"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "byteorder",
+ "cpal",
+ "crossbeam",
+ "ipmb",
+ "num_enum 0.7.1",
+ "parking_lot",
+ "rubato",
+]
 
 [[package]]
 name = "autocfg"
