@@ -1,3 +1,5 @@
+#![feature(result_option_inspect)]
+
 use anyhow::Result;
 
 pub mod player;
