@@ -1,8 +1,22 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import "./App.css";
+
+import { emit, listen } from '@tauri-apps/api/event';
+
+import {} from '@tauri-apps/api/app'
+import { invoke } from "@tauri-apps/api";
 
 function App() {
   const [recording, setRecording] = useState(false);
+
+  useEffect(() => {
+    invoke("is_recording").then(value => {
+      setRecording(!!value);
+    })
+    // listen<string>("")
+  }, []);
+
+
 
   const startRecording = () => {
     setRecording(true);
