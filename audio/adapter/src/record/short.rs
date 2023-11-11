@@ -6,8 +6,8 @@ use cpal::{
   traits::{DeviceTrait, HostTrait, StreamTrait},
   FromSample, Sample, SampleFormat, SizedSample,
 };
-use crossbeam::channel::{Sender, Receiver, unbounded};
-use parking_lot::{RwLock, Mutex};
+use crossbeam::channel::{unbounded, Receiver, Sender};
+use parking_lot::{Mutex, RwLock};
 use rubato::Resampler;
 
 pub struct ShortRecord {
@@ -15,9 +15,8 @@ pub struct ShortRecord {
   config: cpal::SupportedStreamConfig,
   // buffer: Arc<RwLock<Vec<f32>>>,
   sx: Arc<Mutex<Sender<Vec<f32>>>>,
-  rx: Receiver<Vec<f32>>
+  rx: Receiver<Vec<f32>>,
 }
-
 
 impl ShortRecord {
   pub fn new() -> Result<Self> {
@@ -113,7 +112,7 @@ impl ShortRecord {
 
   pub fn stop(&self) -> Result<Vec<i16>> {
     self.sx.clone().lock().send(vec![])?;
-    
+
     let raw = self.rx.recv_timeout(Duration::from_secs(5))?;
 
     let mut resampler =

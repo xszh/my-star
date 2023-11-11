@@ -1,6 +1,9 @@
-use anyhow::{Ok, Result};
+use anyhow::{anyhow, Ok, Result};
+use std::{
+  any,
+  sync::{Arc, LazyLock},
+};
 use tauri::Manager;
-use std::sync::{Arc, LazyLock};
 
 use adapter::record::ShortRecord;
 use parking_lot::{Mutex, RwLock};
@@ -23,16 +26,26 @@ pub(crate) fn get_recorder() -> &'static LazyLock<Arc<RwLock<Option<ShortRecord>
   &RECORDER
 }
 
-pub(crate) fn start_record(app: tauri::AppHandle) -> anyhow::Result<()> {
+async fn _start_record() -> anyhow::Result<()> {
+  get_recorder()
+    .read()
+    .as_ref()
+    .ok_or(anyhow!("no recorder while start record"))?
+    .start()?;
+  Ok(())
+}
+
+pub(crate) async fn start_record(app: tauri::AppHandle) -> anyhow::Result<()> {
   if is_recording() {
     return Ok(());
   }
   set_recording(true, app)?;
 
-  get_recorder()
-    .write()
-    .get_or_insert(ShortRecord::new()?)
-    .start()?;
+  if get_recorder().read().is_none() {
+    *get_recorder().write() = Some(ShortRecord::new()?);
+  }
+
+  tokio::spawn(_start_record());
 
   Ok(())
 }
@@ -44,8 +57,9 @@ pub(crate) fn stop_record(app: tauri::AppHandle) -> Result<Vec<u8>> {
   set_recording(false, app)?;
 
   let data = get_recorder()
-    .write()
-    .get_or_insert(ShortRecord::new()?)
+    .read()
+    .as_ref()
+    .ok_or(anyhow::anyhow!("no recorder while stop recording"))?
     .stop()?;
 
   Ok(data.iter().flat_map(|d| d.to_le_bytes()).collect())
