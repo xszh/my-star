@@ -1,5 +1,52 @@
+@import "@styles/index.less";
+
 .ms-chat {
-  width: 200px;
+  width: unit(400 / 16, rem);
   height: 100vh;
-  background-color: aqua;
+
+  display: flex;
+  flex-direction: column;
+
+  &-messages {
+    flex: auto;
+    background-color: @N00;
+  }
+
+  &-operation {
+    flex: none;
+    height: unit(46/16, rem);
+
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+
+    padding: 0 unit(5/16, rem);
+  }
+
+  &-record {
+    flex: auto;
+    background-color: @N100;
+    color: @N800;
+    .Body-M-18();
+
+    box-sizing: border-box;
+    height: unit(36/16, rem);
+    padding: unit(5/16, rem);
+
+    border: unit(1/16, rem) solid @N400;
+    border-radius: unit(4/16, rem);
+
+    text-align: center;
+
+    cursor: pointer;
+
+    &:hover {
+      background-color: @N50;
+    }
+
+    &:active {
+      background-color: @N300;
+    }
+  }
 }

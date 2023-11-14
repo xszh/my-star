@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{ops::DerefMut, sync::Arc, time::Duration};
 
 use crate::resample;
 use anyhow::{anyhow, Result};
@@ -13,9 +13,18 @@ use rubato::Resampler;
 pub struct ShortRecord {
   device: cpal::Device,
   config: cpal::SupportedStreamConfig,
-  // buffer: Arc<RwLock<Vec<f32>>>,
-  sx: Arc<Mutex<Sender<Vec<f32>>>>,
-  rx: Receiver<Vec<f32>>,
+  buffer: Arc<RwLock<Option<Vec<f32>>>>,
+  csx: Arc<Mutex<Sender<ShortRecordChannel>>>,
+  crx: Receiver<ShortRecordChannel>,
+  dsx: Arc<Mutex<Sender<Vec<f32>>>>,
+  drx: Receiver<Vec<f32>>,
+  capturing: Arc<RwLock<bool>>,
+}
+
+enum ShortRecordChannel {
+  Start,
+  Stop,
+  Close,
 }
 
 impl ShortRecord {
@@ -27,65 +36,118 @@ impl ShortRecord {
 
     let config = device.default_input_config()?;
 
-    let (sx, rx) = unbounded::<Vec<f32>>();
+    let (csx, crx) = unbounded::<ShortRecordChannel>();
+    let (dsx, drx) = unbounded::<Vec<f32>>();
 
     Ok(Self {
       device,
       config,
-      // buffer: Arc::default(),
-      sx: Arc::new(Mutex::new(sx)),
-      rx,
+      buffer: Arc::new(RwLock::new(None)),
+      csx: Arc::new(Mutex::new(csx)),
+      crx,
+      dsx: Arc::new(Mutex::new(dsx)),
+      drx,
+      capturing: Arc::new(RwLock::new(false)),
     })
   }
 
-  fn run<F>(&self, buffer: Arc<Mutex<Vec<f32>>>) -> Result<cpal::Stream>
+  pub fn is_capturing(&self) -> bool {
+    *self.capturing.read()
+  }
+
+  pub fn is_buffering(&self) -> bool {
+    self.buffer.read().is_some()
+  }
+
+  fn run<F>(&self) -> Result<cpal::Stream>
   where
     F: SizedSample,
     f32: FromSample<F>,
   {
     let channel = self.config.clone().channels();
+    let buffer = self.buffer.clone();
     Ok(self.device.build_input_stream(
       &self.config.clone().into(),
       move |data: &[F], _: &_| {
-        Self::write_data(data, &mut buffer.lock(), channel);
+        let mut buffer = buffer.write();
+        if let Some(mut buffer) = buffer.as_mut() {
+          Self::write_data(data, &mut buffer, channel);
+        }
       },
       |e| println!("input stream fail: {}", e),
       None,
     )?)
   }
 
-  pub fn start(&self) -> Result<()> {
-    let buffer: Arc<Mutex<Vec<f32>>> = Arc::default();
-
+  pub fn open(&self) -> Result<()> {
+    if *self.capturing.read() {
+      return Ok(());
+    }
+    *self.capturing.write() = true;
     let stream = match self.config.sample_format() {
-      SampleFormat::I16 => self.run::<i16>(buffer.clone()),
-      SampleFormat::I32 => self.run::<i32>(buffer.clone()),
-      SampleFormat::I64 => self.run::<i64>(buffer.clone()),
-      SampleFormat::U8 => self.run::<u8>(buffer.clone()),
-      SampleFormat::U16 => self.run::<u16>(buffer.clone()),
-      SampleFormat::U32 => self.run::<u32>(buffer.clone()),
-      SampleFormat::U64 => self.run::<u64>(buffer.clone()),
-      SampleFormat::F32 => self.run::<f32>(buffer.clone()),
-      SampleFormat::F64 => self.run::<f64>(buffer.clone()),
+      SampleFormat::I16 => self.run::<i16>(),
+      SampleFormat::I32 => self.run::<i32>(),
+      SampleFormat::I64 => self.run::<i64>(),
+      SampleFormat::U8 => self.run::<u8>(),
+      SampleFormat::U16 => self.run::<u16>(),
+      SampleFormat::U32 => self.run::<u32>(),
+      SampleFormat::U64 => self.run::<u64>(),
+      SampleFormat::F32 => self.run::<f32>(),
+      SampleFormat::F64 => self.run::<f64>(),
       s => Err(anyhow!("unsupported sample format: {}", s)),
     }?;
 
     stream.play()?;
 
+    let buffer = self.buffer.clone();
     loop {
-      if let Err(e) = self.rx.try_recv() {
-        if e.is_empty() {
-          continue;
+      match self.crx.try_recv() {
+        Ok(msg) => match msg {
+          ShortRecordChannel::Start => {
+            *buffer.write() = Some(vec![]);
+            continue;
+          }
+          ShortRecordChannel::Stop => {
+            let buf = buffer
+              .write()
+              .take()
+              .ok_or(anyhow!("stop while no buffer"))?;
+
+            self.dsx.lock().send(buf)?;
+            continue;
+          }
+          ShortRecordChannel::Close => {
+            break;
+          }
+        },
+        Err(e) => {
+          if e.is_empty() {
+            continue;
+          } else {
+            eprintln!("try recv error: {e}");
+            break;
+          }
         }
       }
-      break;
     }
     drop(stream);
 
-    let fin_buffer = buffer.clone();
-    self.sx.clone().lock().send(fin_buffer.lock().to_vec())?;
-
+    *self.capturing.write() = false;
     Ok(())
+  }
+
+  pub fn close(&self) -> anyhow::Result<()> {
+    if !self.is_capturing() {
+      return Err(anyhow!("not open yet"));
+    }
+    Ok(self.csx.lock().send(ShortRecordChannel::Close)?)
+  }
+
+  pub fn start(&self) -> anyhow::Result<()> {
+    if self.is_buffering() {
+      return Ok(());
+    }
+    Ok(self.csx.lock().send(ShortRecordChannel::Start)?)
   }
 
   fn write_data<F>(data: &[F], buffer: &mut Vec<f32>, channel: u16)
@@ -111,10 +173,13 @@ impl ShortRecord {
   }
 
   pub fn stop(&self) -> Result<Vec<i16>> {
-    self.sx.clone().lock().send(vec![])?;
+    if !self.is_buffering() {
+      return Err(anyhow!("not start yet"));
+    }
 
-    let raw = self.rx.recv_timeout(Duration::from_secs(5))?;
+    self.csx.clone().lock().send(ShortRecordChannel::Stop)?;
 
+    let raw = self.drx.recv_timeout(Duration::from_secs(5))?;
     let mut resampler =
       resample::resample::<f32>(self.config.sample_rate().0 as f64, 16000f64, raw.len())?;
     let mut out = resampler.output_buffer_allocate(true);
@@ -124,11 +189,11 @@ impl ShortRecord {
       .get(0)
       .ok_or(anyhow!("get first channel fail"))?
       .to_vec();
-    Ok(
+    return Ok(
       out
         .into_iter()
         .map(|item| i16::from_sample(item))
         .collect::<Vec<i16>>(),
-    )
+    );
   }
 }

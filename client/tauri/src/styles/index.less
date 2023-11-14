@@ -1,0 +1,215 @@
+@N1000: #000000;
+@N950: #0f1114;
+@N900: #1f2329;
+@N800: #2b2f36;
+@N700: #373c43;
+@N650: #51565d;
+@N600: #646a73;
+@N500: #8f959e;
+@N450: #a5aab1;
+@N400: #bbbfc4;
+@N350: #d0d3d6;
+@N300: #dee0e3;
+@N200: #eff0f1;
+@N100: #f2f3f5;
+@N50: #f5f6f7;
+@N00: #ffffff;
+
+@B900: #002270;
+@B800: #002f9e;
+@B700: #0442d2;
+@B600: #1456f0;
+@B500: #336df4;
+@B400: #5083fb;
+@B350: #7aa2ff;
+@B300: #94b4ff;
+@B200: #c2d4ff;
+@B100: #e0e9ff;
+@B50: #f0f4ff;
+
+@R900: #530704;
+@R800: #741915;
+@R700: #a11c17;
+@R600: #c02a26;
+@R500: #e22e28;
+@R400: #f54a45;
+@R350: #f67e7a;
+@R300: #f98e9b;
+@R200: #fdc6c4;
+@R100: #fee3e2;
+@R50: #fef0f0;
+
+@O900: #3b1a02;
+@O800: #642b02;
+@O700: #853a05;
+@O600: #a44905;
+@O500: #c25705;
+@O400: #ed6d0c;
+@O350: #ff811a;
+@O300: #ff9d4c;
+@O200: #fec48b;
+@O100: #fee7cd;
+@O50: #fff3e5;
+
+@G900: #022c07;
+@G800: #04430c;
+@G700: #0b6017;
+@G600: #1a7526;
+@G500: #258832;
+@G400: #32a645;
+@G350: #35bd4b;
+@G300: #5cd168;
+@G200: #95e599;
+@G100: #d0f5ce;
+@G50: #e4fae1;
+
+@Y500: #ffc60a;
+@P500: #7f3bf5;
+@T300: #64e8d6;
+
+@regular: 400;
+@medium: 500;
+@semibold: 600;
+
+.typography(@fontSize, @lineHeight, @weight) {
+  font-size: unit(@fontSize / 16, rem);
+  line-height: unit(@lineHeight / 16, rem);
+  font-weight: @weight;
+}
+
+.Huge-M-48() {
+  .typography(48, 62, @medium);
+}
+
+.Huge-S-44() {
+  .typography(44, 58, @semibold);
+}
+
+.Huge-M-44() {
+  .typography(44, 52, @medium);
+}
+
+.Title-M-42() {
+  .typography(42, 56, @medium);
+}
+
+.Title-M-38() {
+  .typography(38, 49, @medium);
+}
+
+.Title-R-38() {
+  .typography(38, 49, @regular);
+}
+
+.Title-M-36() {
+  .typography(36, 48, @medium);
+}
+
+.Title-S-36() {
+  .typography(36, 48, @semibold);
+}
+
+.Title-M-32() {
+  .typography(32, 44, @medium);
+}
+
+.Title-R-32() {
+  .typography(32, 44, @regular);
+}
+
+.Title-M-30() {
+  .typography(30, 42, @medium);
+}
+
+.Title-R-30() {
+  .typography(30, 42, @regular);
+}
+
+.Title-S-30() {
+  .typography(30, 42, @semibold);
+}
+
+.Title-SI-30() {
+  font-style: italic;
+  .typography(30, 42, @semibold);
+}
+
+.Title-M-28() {
+  .typography(28, 40, @medium);
+}
+
+.Title-R-28() {
+  .typography(28, 40, @regular);
+}
+
+.Headline-M-26() {
+  .typography(26, 38, @medium);
+}
+
+.Headline-R-26() {
+  .typography(26, 38, @regular);
+}
+
+.Headline-SI-26() {
+  font-style: italic;
+  .typography(26, 38, @semibold);
+}
+
+.Body-M-24() {
+  .typography(24, 36, @medium);
+}
+
+.Body-R-24() {
+  .typography(24, 36, @regular);
+}
+
+.Body-M-22() {
+  .typography(22, 32, @medium);
+}
+
+.Body-R-22() {
+  .typography(22, 32, @regular);
+}
+
+.Body-M-20() {
+  .typography(20, 30, @medium);
+}
+
+.Body-R-20() {
+  .typography(20, 30, @regular);
+}
+
+.Body-M-18() {
+  .typography(18, 26, @medium);
+}
+
+.Body-R-18() {
+  .typography(18, 26, @regular);
+}
+
+.Caption-M-16() {
+  .typography(16, 22, @medium);
+}
+
+.Caption-R-16() {
+  .typography(16, 22, @regular);
+}
+
+.Caption-M-14() {
+  .typography(14, 20, @medium);
+}
+
+.Caption-R-14() {
+  .typography(14, 20, @regular);
+}
+
+html {
+  font-size: 16px;
+  font-family: BlinkMacSystemFont, "Segoe UI", "Microsoft Yahei", sans-serif;
+}
+
+#root {
+  background-color: @N200;
+  width: 100vw;
+  height: 100vh;
+}

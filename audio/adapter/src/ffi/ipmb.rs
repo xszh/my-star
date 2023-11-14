@@ -16,6 +16,8 @@ pub enum AdapterMessageFormat {
 #[derive(Debug, TryFromPrimitive)]
 #[repr(u8)]
 pub enum ControlFlowCommand {
+  Open,
+  Close,
   Play,
   Stop,
 }
@@ -60,6 +62,24 @@ impl EndPoint {
       .and_then(|val| ControlFlowCommand::try_from(*val).ok())
       .ok_or(anyhow!("invalid control flow command"))?
     {
+      ControlFlowCommand::Open => {
+        println!("start open");
+        let record = self.record.clone();
+        std::thread::spawn(move || {
+          if let Err(e) = record.open() {
+            eprintln!("open fail: {}", e);
+          }
+        });
+      }
+      ControlFlowCommand::Close => {
+        println!("start close");
+        let record = self.record.clone();
+        std::thread::spawn(move || {
+          if let Err(e) = record.close() {
+            eprintln!("close fail: {}", e);
+          }
+        });
+      }
       ControlFlowCommand::Play => {
         println!("start play");
         let record = self.record.clone();
