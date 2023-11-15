@@ -5,7 +5,7 @@ use ipmb::{label, BytesMessage, EndpointReceiver, EndpointSender, Message, Optio
 use num_enum::TryFromPrimitive;
 use parking_lot::Mutex;
 
-use crate::{record::ShortRecord, Adapter};
+use crate::record::ShortRecord;
 
 #[derive(Debug, TryFromPrimitive)]
 #[repr(u16)]
@@ -107,15 +107,5 @@ impl EndPoint {
       }
     };
     Ok(())
-  }
-}
-
-impl Adapter for EndPoint {
-  fn start_record() -> Result<()> {
-    todo!()
-  }
-
-  fn stop_record() -> Result<()> {
-    todo!()
   }
 }

@@ -7,7 +7,7 @@ mod audio;
 
 #[tauri::command]
 async fn is_recording() -> Result<bool, ()> {
-  Ok(audio::is_recording())
+  Ok(audio::is_capturing())
 }
 
 #[tauri::command]

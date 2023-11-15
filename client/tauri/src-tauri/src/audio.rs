@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Ok, Result};
 use std::{
   any,
+  ops::Deref,
   sync::{Arc, LazyLock},
 };
 use tauri::Manager;
@@ -8,15 +9,27 @@ use tauri::Manager;
 use adapter::record::ShortRecord;
 use parking_lot::{Mutex, RwLock};
 
-static RECORDING: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
+pub(crate) fn is_capturing() -> bool {
+  get_recorder()
+    .read()
+    .as_ref()
+    .map_or(false, |r| r.is_capturing())
+}
 
 pub(crate) fn is_recording() -> bool {
-  *RECORDING.lock()
+  get_recorder()
+    .read()
+    .as_ref()
+    .map_or(false, |r| r.is_buffering())
+}
+
+fn set_capturing(value: bool, app: tauri::AppHandle) -> anyhow::Result<()> {
+  app.emit_all("capturing", value)?;
+  Ok(())
 }
 
 fn set_recording(value: bool, app: tauri::AppHandle) -> anyhow::Result<()> {
   app.emit_all("recording", value)?;
-  *RECORDING.lock() = value;
   Ok(())
 }
 
@@ -35,15 +48,51 @@ async fn _start_record() -> anyhow::Result<()> {
   Ok(())
 }
 
-pub(crate) async fn start_record(app: tauri::AppHandle) -> anyhow::Result<()> {
-  if is_recording() {
+pub(crate) async fn audio_open(app: tauri::AppHandle) -> anyhow::Result<()> {
+  if is_capturing() {
     return Ok(());
   }
-  set_recording(true, app)?;
 
   if get_recorder().read().is_none() {
     *get_recorder().write() = Some(ShortRecord::new()?);
   }
+
+  get_recorder()
+    .read()
+    .as_ref()
+    .ok_or(anyhow!("no recorder while start record"))?
+    .open()?;
+
+  set_capturing(true, app)?;
+  Ok(())
+}
+
+pub(crate) async fn audio_close(app: tauri::AppHandle) -> anyhow::Result<()> {
+  if !is_capturing() {
+    return Ok(());
+  }
+
+  get_recorder()
+    .read()
+    .as_ref()
+    .take()
+    .ok_or(anyhow!("no recorder while close record"))?
+    .close()?;
+
+  set_capturing(false, app);
+  Ok(())
+}
+
+pub(crate) async fn start_record(app: tauri::AppHandle) -> anyhow::Result<()> {
+  if !is_capturing() {
+    return Err(anyhow!("not capture"));
+  }
+
+  if is_recording() {
+    return Ok(());
+  }
+
+  set_recording(true, app)?;
 
   tokio::spawn(_start_record());
 
@@ -51,16 +100,20 @@ pub(crate) async fn start_record(app: tauri::AppHandle) -> anyhow::Result<()> {
 }
 
 pub(crate) fn stop_record(app: tauri::AppHandle) -> Result<Vec<u8>> {
-  if !is_recording() {
+  if !is_capturing() {
+    return Err(anyhow!("not capture"));
+  }
+  if !is_capturing() {
     return Ok(vec![]);
   }
-  set_recording(false, app)?;
 
   let data = get_recorder()
     .read()
     .as_ref()
     .ok_or(anyhow::anyhow!("no recorder while stop recording"))?
     .stop()?;
+
+  set_recording(false, app)?;
 
   Ok(data.iter().flat_map(|d| d.to_le_bytes()).collect())
 }
