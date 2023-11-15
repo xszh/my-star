@@ -1,13 +1,19 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
+import path from "path";
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react({
+      tsDecorators: true,
+    }),
+  ],
   resolve: {
     alias: {
-      "@styles": "./src/styles",
-      "@components": "./src/components",
+      "@styles": path.resolve(__dirname, "./src/styles"),
+      "@components": path.resolve(__dirname, "./src/components"),
+      "@services": path.resolve(__dirname, "./src/services"),
     },
   },
   css: {
@@ -41,5 +47,10 @@ export default defineConfig({
     minify: !process.env.TAURI_DEBUG ? "esbuild" : false,
     // 为调试构建生成源代码映射 (sourcemap)
     sourcemap: !!process.env.TAURI_DEBUG,
+  },
+  optimizeDeps: {
+    esbuildOptions: {
+      tsconfig: path.resolve(__dirname, "tsconfig.json"),
+    },
   },
 });

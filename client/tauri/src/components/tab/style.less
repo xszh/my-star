@@ -1,0 +1,40 @@
+@import "@styles/index.less";
+
+.mystar-tabs {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: stretch;
+
+  &-header {
+    flex: none;
+    box-sizing: border-box;
+    height: unit(32/16, rem);
+
+    background-color: @N300;
+
+    display: flex;
+    flex-direction: row;
+
+    &-item {
+      min-width: unit(80/16, rem);
+
+      box-sizing: border-box;
+      .Body-R-18();
+      color: @N800;
+
+      cursor: pointer;
+      padding: unit(3/16, rem) unit(8/16, rem);
+
+      &__active {
+        background-color: @N200;
+      }
+    }
+  }
+
+  &-body {
+    flex: auto;
+
+    padding: unit(8/16, rem);
+  }
+}

@@ -11,8 +11,10 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^1.5.1",
+    "classnames": "^2.3.2",
     "less": "^4.2.0",
     "mobx": "^6.11.0",
+    "mobx-react": "^9.1.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
@@ -25,6 +27,8 @@
     "@typescript-eslint/parser": "^6.0.0",
     "@vitejs/plugin-react-swc": "^3.3.2",
     "eslint": "^8.45.0",
+    "eslint-import-resolver-alias": "^1.1.2",
+    "eslint-plugin-import": "^2.29.0",
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.3",
     "typescript": "^5.0.2",

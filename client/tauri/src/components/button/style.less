@@ -1,0 +1,28 @@
+@import "@styles/index.less";
+
+.mystar-button {
+  box-sizing: border-box;
+
+  height: unit(24/16, rem);
+  padding: unit(2/16, rem) unit(8/16, rem);
+
+  .Caption-R-14;
+  color: @N800;
+  background-color: @N100;
+
+  cursor: pointer;
+
+  border-radius: unit(2/16, rem);
+  border: unit(1/16, rem) solid @N400;
+
+  text-align: center;
+
+  min-width: unit(80/16, rem);
+
+  &:hover {
+    background-color: @N50;
+  }
+  &:active {
+    background-color: @N300;
+  }
+}
