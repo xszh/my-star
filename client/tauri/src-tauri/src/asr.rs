@@ -23,6 +23,11 @@ where
 {
   let buffer = stop_record(app)?;
 
+  if buffer.is_empty() {
+    println!("asr buffer is empty");
+    return Ok("".into());
+  }
+
   let client = reqwest::Client::new();
   let mut params: HashMap<&str, &str> = Default::default();
   params.insert("appkey", app_id.as_ref());

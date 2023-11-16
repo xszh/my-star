@@ -3,7 +3,6 @@ use anyhow::{anyhow, Ok, Result};
 use tauri::Manager;
 
 fn set_capturing(value: bool, app: tauri::AppHandle) -> anyhow::Result<()> {
-  println!("emit audio_capture: {}", value);
   app.emit_all("audio_capture", value)?;
   Ok(())
 }
@@ -41,7 +40,6 @@ pub(crate) async fn audio_close(app: tauri::AppHandle) -> anyhow::Result<()> {
   Ok(())
 }
 
-
 pub(crate) async fn start_record(app: tauri::AppHandle) -> anyhow::Result<()> {
   if !short::is_capturing() {
     return Err(anyhow!("not capture"));
@@ -65,6 +63,8 @@ pub(crate) fn stop_record(app: tauri::AppHandle) -> Result<Vec<u8>> {
   }
 
   let data = short::stop()?;
+
+  println!("data len: {}", data.len());
   set_recording(false, app)?;
   Ok(data.iter().flat_map(|d| d.to_le_bytes()).collect())
 }

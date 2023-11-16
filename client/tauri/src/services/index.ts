@@ -1,4 +1,3 @@
-import { observable } from "mobx";
 import { AudioManager } from "./audio";
 import { useRef } from "react";
 import { S_DESTROY, S_INIT, Service } from "./base";
@@ -12,7 +11,6 @@ const ServiceConfig = {
 type ServiceMap = typeof ServiceConfig;
 
 class _ServiceManager {
-  @observable
   private services: Map<keyof ServiceMap, Service> = new Map();
 
   constructor() {

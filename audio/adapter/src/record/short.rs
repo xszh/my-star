@@ -1,7 +1,7 @@
 use std::{
   default,
   sync::{Arc, LazyLock},
-  time::Duration,
+  time::{Duration, Instant},
 };
 
 use crate::resample;
@@ -21,7 +21,7 @@ pub enum ShortRecordChannel {
 }
 
 struct ShortRecord {
-  buffer: Option<Vec<f32>>,
+  buffer: Arc<RwLock<Option<Vec<f32>>>>,
   ch_cmd: (Sender<ShortRecordChannel>, Receiver<ShortRecordChannel>),
   ch_data: (Sender<Vec<i16>>, Receiver<Vec<i16>>),
   recording: bool,
@@ -33,7 +33,7 @@ type TShortRecord = Arc<RwLock<ShortRecord>>;
 fn get_recorder() -> &'static LazyLock<TShortRecord> {
   static RECORDER: LazyLock<TShortRecord> = LazyLock::new(|| {
     Arc::new(RwLock::new(ShortRecord {
-      buffer: None,
+      buffer: Arc::new(RwLock::new(None)),
       ch_cmd: unbounded::<ShortRecordChannel>(),
       ch_data: unbounded::<Vec<i16>>(),
       recording: false,
@@ -80,20 +80,20 @@ pub fn capturing(rx: &Receiver<ShortRecordChannel>) -> Result<()> {
           {
             let mut recorder = get_recorder().write();
             recorder.recording = true;
-            recorder.buffer = Some(vec![]);
+            *recorder.buffer.write() = Some(vec![]);
           }
           continue;
         }
         ShortRecordChannel::Stop => {
-          let buf = {
-            let mut recorder = get_recorder().write();
-            let buf = recorder
-              .buffer
-              .take()
-              .ok_or(anyhow!("stop while no buffer"))?;
-            recorder.recording = false;
-            buf
-          };
+          println!("audio ctrl stop");
+          get_recorder().write().recording = false;
+
+          let buf = get_recorder()
+            .read()
+            .buffer
+            .write()
+            .take()
+            .ok_or(anyhow!("stop while no buffer"))?;
 
           let config = raw_config.clone();
           std::thread::spawn(move || -> Result<()> {
@@ -129,6 +129,7 @@ pub fn capturing(rx: &Receiver<ShortRecordChannel>) -> Result<()> {
     }
   }
 
+  drop(stream);
   get_recorder().write().capturing = false;
   Ok(())
 }
@@ -143,6 +144,7 @@ fn finalized_data(config: &SupportedStreamConfig, buf: &[f32]) -> Result<Vec<i16
     .ok_or(anyhow!("get first channel fail"))?
     .to_vec();
 
+  println!("finalizing data. len: {}", out.len());
   Ok(
     out
       .into_iter()
@@ -161,7 +163,11 @@ pub fn open() -> Result<()> {
 }
 
 pub fn close() -> Result<()> {
-  get_recorder().read().ch_cmd.0.send(ShortRecordChannel::Close)?;
+  get_recorder()
+    .read()
+    .ch_cmd
+    .0
+    .send(ShortRecordChannel::Close)?;
   Ok(())
 }
 
@@ -169,7 +175,12 @@ pub fn start() -> Result<()> {
   if get_recorder().read().recording {
     return Ok(());
   }
-  get_recorder().read().ch_cmd.0.send(ShortRecordChannel::Start)?;
+  println!("short::start");
+  get_recorder()
+    .read()
+    .ch_cmd
+    .0
+    .send(ShortRecordChannel::Start)?;
   Ok(())
 }
 
@@ -177,14 +188,35 @@ pub fn stop() -> Result<Vec<i16>> {
   if !get_recorder().read().recording {
     return Ok(vec![]);
   }
-  get_recorder().read().ch_cmd.0.send(ShortRecordChannel::Stop)?;
+  println!("short::stop");
+  get_recorder()
+    .read()
+    .ch_cmd
+    .0
+    .send(ShortRecordChannel::Stop)?;
 
+  // println!("short::stop sent");
   let final_data = get_recorder()
     .read()
     .ch_data
     .1
     .recv_timeout(Duration::from_secs(5))?;
+
   Ok(final_data)
+
+  // loop {
+  //   match get_recorder().read().ch_data.1.try_recv() {
+  //     Ok(d) => {
+  //       return Ok(d);
+  //     }
+  //     Err(e) => {
+  //       if e.is_empty() {
+  //         continue;
+  //       }
+  //       return Err(anyhow!("recv error"));
+  //     }
+  //   }
+  // }
 }
 
 fn run<F>(device: &cpal::Device, config: &cpal::SupportedStreamConfig) -> Result<cpal::Stream>
@@ -197,9 +229,12 @@ where
   Ok(device.build_input_stream(
     &config.clone().into(),
     move |data: &[F], _: &_| {
-      let mut rec = rec.write();
-      if let Some(mut buffer) = rec.buffer.as_mut() {
-        write_data(data, &mut buffer, channel);
+      if rec.read().recording {
+        let rec = rec.read();
+        let mut buf = rec.buffer.write();
+        if let Some(mut buffer) = buf.as_mut() {
+          write_data(data, &mut buffer, channel);
+        }
       }
     },
     |e| println!("input stream fail: {}", e),

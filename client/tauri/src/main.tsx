@@ -1,10 +1,15 @@
-import React from 'react'
-import ReactDOM from 'react-dom/client'
-import {App} from './App.tsx'
-import './index.less'
+import React from "react";
+import ReactDOM from "react-dom/client";
+import { App } from "./App.tsx";
+import { observer } from "mobx-react";
+import "./index.less";
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-)
+const Root = observer(function Root() {
+  return (
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>
+  );
+});
+
+ReactDOM.createRoot(document.getElementById("root")!).render(<App />);
