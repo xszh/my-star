@@ -5,7 +5,7 @@ use ipmb::{label, BytesMessage, EndpointReceiver, EndpointSender, Message, Optio
 use num_enum::TryFromPrimitive;
 use parking_lot::Mutex;
 
-use crate::record::ShortRecord;
+use crate::record::short;
 
 #[derive(Debug, TryFromPrimitive)]
 #[repr(u16)]
@@ -25,7 +25,6 @@ pub enum ControlFlowCommand {
 pub struct EndPoint {
   pub sx: Arc<Mutex<EndpointSender<BytesMessage>>>,
   pub rx: EndpointReceiver<BytesMessage>,
-  record: Arc<ShortRecord>,
 }
 
 impl EndPoint {
@@ -37,7 +36,6 @@ impl EndPoint {
     Ok(Self {
       sx: Arc::new(Mutex::new(sx)),
       rx: rx,
-      record: Arc::new(ShortRecord::new()?),
     })
   }
 
@@ -64,34 +62,31 @@ impl EndPoint {
     {
       ControlFlowCommand::Open => {
         println!("start open");
-        let record = self.record.clone();
         std::thread::spawn(move || {
-          if let Err(e) = record.open() {
+          if let Err(e) = short::open() {
             eprintln!("open fail: {}", e);
           }
         });
       }
       ControlFlowCommand::Close => {
         println!("start close");
-        let record = self.record.clone();
         std::thread::spawn(move || {
-          if let Err(e) = record.close() {
+          if let Err(e) = short::close() {
             eprintln!("close fail: {}", e);
           }
         });
       }
       ControlFlowCommand::Play => {
         println!("start play");
-        let record = self.record.clone();
         std::thread::spawn(move || {
-          if let Err(e) = record.start() {
+          if let Err(e) = short::start() {
             eprintln!("start fail: {}", e);
           }
         });
       }
       ControlFlowCommand::Stop => {
         println!("stop play");
-        let buffer = self.record.stop()?;
+        let buffer = short::stop()?;
         let _sx = self.sx.clone();
         std::thread::spawn(move || {
           if let Err(e) = _sx.lock().send(Message::new(

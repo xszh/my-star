@@ -21,3 +21,4 @@ ipmb = "0.7.3"
 num_enum = "0.7.1"
 parking_lot = "0.12.1"
 rubato = "0.14.1"
+tokio = { version = "1.34.0", features = ["full"] }
