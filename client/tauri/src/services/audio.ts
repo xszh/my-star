@@ -1,5 +1,6 @@
 import { action, makeObservable, observable } from "mobx";
 import { Service } from "./base";
+import { getToken } from "./auth";
 
 export class AudioManager extends Service {
   init(): void {
@@ -70,7 +71,7 @@ export class AudioManager extends Service {
       try {
         return this.invoke<string>("stop_asr", {
           appId: "45KqS2ZhFlq6F9Sp",
-          token: "d6d62ae9f90c4b34944708daf2f37e67",
+          token: await getToken(),
         });
       } catch (error) {
         return `${error}`;

@@ -1,4 +1,4 @@
-import { ServiceManager } from "./services";
+import { ServiceManager, useService } from "./services";
 
 import { Chat } from "./components/chat";
 import { Tab, Tabs } from "./components/tab";
@@ -11,6 +11,7 @@ import { observer } from "mobx-react";
 import "./App.less";
 
 export const App = observer(function App() {
+  const auth = useService().get("auth");
   useEffect(() => {
     ServiceManager.init();
     return () => {
@@ -24,8 +25,8 @@ export const App = observer(function App() {
         <Tab id="audio" title="Audio">
           <AudioTab />
         </Tab>
-        <Tab id="test" title="Test">
-          {"Test"}
+        <Tab id="info" title="Info">
+          <div>{`Token: ${auth.token}`}</div>
         </Tab>
       </Tabs>
     </div>

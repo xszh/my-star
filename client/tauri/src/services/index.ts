@@ -1,9 +1,11 @@
 import { AudioManager } from "./audio";
 import { useRef } from "react";
 import { S_DESTROY, S_INIT, Service } from "./base";
+import { AuthService } from "./auth";
 
 const ServiceConfig = {
   audio: new AudioManager(),
+  auth: new AuthService(),
 };
 
 type ServiceMap = typeof ServiceConfig;

@@ -25,11 +25,9 @@
     padding: 0 unit(5/16, rem);
   }
 
+  &-input,
   &-record {
     flex: auto;
-    background-color: @N100;
-    color: @N800;
-    .Body-M-18();
 
     box-sizing: border-box;
     height: unit(36/16, rem);
@@ -37,7 +35,24 @@
 
     border: unit(1/16, rem) solid @N400;
     border-radius: unit(4/16, rem);
+  }
 
+  &-input {
+    background-color: @N00;
+    color: @N600;
+    .Caption-M-16();
+
+    padding: unit(0/16, rem) unit(8/16, rem);
+
+    &:focus-visible {
+      outline: none;
+    }
+  }
+
+  &-record {
+    background-color: @N100;
+    color: @N800;
+    .Body-M-18();
     text-align: center;
 
     cursor: pointer;
@@ -54,7 +69,7 @@
   &-mode {
     width: unit(36/18, rem);
     height: unit(36/18, rem);
-    
+
     display: flex;
     align-items: center;
     justify-content: center;

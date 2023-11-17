@@ -8,11 +8,12 @@ import cx from "classnames";
 import "./style.less";
 import { Icon } from "../icon";
 import { makeObservable, observable } from "mobx";
+import { dialog } from "@tauri-apps/api";
 
 interface Message {
-  sender: string,
-  content: string,
-  time: Date,
+  sender: string;
+  content: string;
+  time: Date;
 }
 
 class ChatStore {
@@ -24,8 +25,8 @@ class ChatStore {
       sender,
       content,
       time: new Date(),
-    })
-  }
+    });
+  };
 
   constructor() {
     makeObservable(this);
@@ -36,7 +37,7 @@ export const Chat: React.FC = observer(function () {
   const audioService = useService().get("audio");
   const { capturing, recording } = audioService;
 
-  const [mode, setMode] = useState<'Audio' | 'Text'>('Text');
+  const [mode, setMode] = useState<"Audio" | "Text">("Text");
 
   const chatStore = useRef(new ChatStore()).current;
 
@@ -48,39 +49,44 @@ export const Chat: React.FC = observer(function () {
 
   const onStop = () => {
     if (!capturing) return;
-    audioService.stopASR().then(res => {
+    audioService.stopASR().then((res) => {
       if (res) {
-        chatStore.push(res, 'ASR');
+        chatStore.push(res, "ASR");
       }
     });
   };
 
   useEffect(() => {
     if (!capturing) {
-      setMode('Text');
+      setMode("Text");
     }
   }, [capturing]);
 
   return (
     <div className="ms-chat">
-      <div className="ms-chat-messages">{
-        chatStore.messages.map(msg => {
-          return (<div key={msg.time.getTime()}>{msg.content}</div>)
-        })
-      }</div>
+      <div className="ms-chat-messages">
+        {chatStore.messages.map((msg) => {
+          return <div key={msg.time.getTime()}>{msg.content}</div>;
+        })}
+      </div>
       <div className="ms-chat-operation">
         {
-          <div className="ms-chat-mode" onClick={() => {
-            if (capturing) {
-              setMode(mode === 'Text' ? 'Audio' : 'Text')
-            } else {
-              setMode('Text');
-            }
-          }}>
-            <Icon name={mode === 'Text' ? 'keyboard-26' : 'mic-player'} />
+          <div
+            className="ms-chat-mode"
+            onClick={() => {
+              if (capturing) {
+                setMode(mode === "Text" ? "Audio" : "Text");
+              } else {
+                dialog.message("未收音");
+                setMode("Text");
+              }
+            }}
+          >
+            <Icon name={mode === "Text" ? "keyboard-26" : "mic-player"} />
           </div>
         }
-        {mode === 'Audio' && (
+        {mode === "Text" && <input className="ms-chat-input" />}
+        {mode === "Audio" && (
           <button
             className={cx("ms-chat-record")}
             onMouseDown={onStart}
