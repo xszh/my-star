@@ -4,7 +4,7 @@ use std::{
   time::{Duration, Instant},
 };
 
-use crate::resample;
+use crate::{resample, utils::UBChannel};
 use anyhow::{anyhow, Result};
 use cpal::{
   traits::{DeviceTrait, HostTrait, StreamTrait},
@@ -14,44 +14,54 @@ use crossbeam::channel::{unbounded, Receiver, Sender};
 use parking_lot::{Mutex, RwLock};
 use rubato::Resampler;
 
+#[derive(Debug)]
 pub enum ShortRecordChannel {
   Start,
   Stop,
   Close,
 }
 
+type AM<T> = Arc<Mutex<T>>;
+type ARW<T> = Arc<RwLock<T>>;
+
 struct ShortRecord {
-  buffer: Arc<RwLock<Option<Vec<f32>>>>,
-  ch_cmd: (Sender<ShortRecordChannel>, Receiver<ShortRecordChannel>),
-  ch_data: (Sender<Vec<i16>>, Receiver<Vec<i16>>),
-  recording: bool,
-  capturing: bool,
+  buffer: ARW<Vec<f32>>,
+  ch_cmd: UBChannel<ShortRecordChannel>,
+  ch_data: UBChannel<Vec<i16>>,
+  recording: AM<bool>,
+  capturing: AM<bool>,
 }
 
-type TShortRecord = Arc<RwLock<ShortRecord>>;
+impl ShortRecord {
+  pub fn set_capturing(&self, value: bool) {
+    *self.capturing.lock() = value;
+  }
 
-fn get_recorder() -> &'static LazyLock<TShortRecord> {
-  static RECORDER: LazyLock<TShortRecord> = LazyLock::new(|| {
-    Arc::new(RwLock::new(ShortRecord {
-      buffer: Arc::new(RwLock::new(None)),
-      ch_cmd: unbounded::<ShortRecordChannel>(),
-      ch_data: unbounded::<Vec<i16>>(),
-      recording: false,
-      capturing: false,
-    }))
+  pub fn set_recording(&self, value: bool) {
+    *self.recording.lock() = value;
+  }
+}
+
+fn get_recorder() -> &'static LazyLock<ShortRecord> {
+  static RECORDER: LazyLock<ShortRecord> = LazyLock::new(|| ShortRecord {
+    buffer: Arc::new(RwLock::new(vec![])),
+    ch_cmd: UBChannel::new(),
+    ch_data: UBChannel::new(),
+    recording: Arc::new(Mutex::new(false)),
+    capturing: Arc::new(Mutex::new(false)),
   });
   &RECORDER
 }
 
 pub fn is_recording() -> bool {
-  get_recorder().read().recording
+  *get_recorder().recording.lock()
 }
 
 pub fn is_capturing() -> bool {
-  get_recorder().read().capturing
+  *get_recorder().capturing.lock()
 }
 
-pub fn capturing(rx: &Receiver<ShortRecordChannel>) -> Result<()> {
+pub fn capturing() -> Result<()> {
   let host = cpal::default_host();
   let device = host.default_input_device().ok_or(anyhow!(""))?;
   let raw_config = device.default_input_config()?;
@@ -70,54 +80,50 @@ pub fn capturing(rx: &Receiver<ShortRecordChannel>) -> Result<()> {
     s => Err(anyhow!("unsupported sample format: {}", s)),
   }?;
 
-  get_recorder().write().capturing = true;
+  get_recorder().set_capturing(true);
   stream.play()?;
 
   loop {
-    match rx.try_recv() {
-      Ok(msg) => match msg {
-        ShortRecordChannel::Start => {
-          {
-            let mut recorder = get_recorder().write();
-            recorder.recording = true;
-            *recorder.buffer.write() = Some(vec![]);
+    match get_recorder().ch_cmd.try_recv() {
+      Ok(msg) => {
+        println!("ShortRecordChannel::{:?}", msg);
+        match msg {
+          ShortRecordChannel::Start => {
+            get_recorder().set_recording(true);
+            get_recorder().buffer.write().clear();
+            continue;
           }
-          continue;
-        }
-        ShortRecordChannel::Stop => {
-          println!("audio ctrl stop");
-          get_recorder().write().recording = false;
+          ShortRecordChannel::Stop => {
+            get_recorder().set_recording(false);
 
-          let buf = get_recorder()
-            .read()
-            .buffer
-            .write()
-            .take()
-            .ok_or(anyhow!("stop while no buffer"))?;
+            let buf = get_recorder()
+              .buffer
+              .write()
+              .drain(..)
+              .collect::<Vec<f32>>();
 
-          let config = raw_config.clone();
-          std::thread::spawn(move || -> Result<()> {
-            get_recorder()
-              .read()
-              .ch_data
-              .0
-              .send(match finalized_data(&config, &buf) {
-                Ok(data) => data,
-                Err(e) => {
-                  eprintln!("finalize data fail: {}", e);
-                  Vec::<i16>::new()
-                }
-              })?;
+            let config = raw_config.clone();
+            std::thread::spawn(move || -> Result<()> {
+              get_recorder()
+                .ch_data
+                .send(match finalized_data(&config, &buf) {
+                  Ok(data) => data,
+                  Err(e) => {
+                    eprintln!("finalize data fail: {}", e);
+                    Vec::<i16>::new()
+                  }
+                });
 
-            get_recorder().write().recording = false;
-            Ok(())
-          });
-          continue;
+              get_recorder().set_recording(false);
+              Ok(())
+            });
+            continue;
+          }
+          ShortRecordChannel::Close => {
+            break;
+          }
         }
-        ShortRecordChannel::Close => {
-          break;
-        }
-      },
+      }
       Err(e) => {
         if e.is_empty() {
           continue;
@@ -130,7 +136,7 @@ pub fn capturing(rx: &Receiver<ShortRecordChannel>) -> Result<()> {
   }
 
   drop(stream);
-  get_recorder().write().capturing = false;
+  get_recorder().set_capturing(false);
   Ok(())
 }
 
@@ -144,7 +150,6 @@ fn finalized_data(config: &SupportedStreamConfig, buf: &[f32]) -> Result<Vec<i16
     .ok_or(anyhow!("get first channel fail"))?
     .to_vec();
 
-  println!("finalizing data. len: {}", out.len());
   Ok(
     out
       .into_iter()
@@ -154,69 +159,40 @@ fn finalized_data(config: &SupportedStreamConfig, buf: &[f32]) -> Result<Vec<i16
 }
 
 pub fn open() -> Result<()> {
-  let ctrl = get_recorder().read().ch_cmd.clone();
+  // let ctrl = get_recorder().ch_cmd.r;
   std::thread::spawn(move || {
-    capturing(&ctrl.1).expect("??");
+    capturing().expect("??");
   });
 
   Ok(())
 }
 
 pub fn close() -> Result<()> {
-  get_recorder()
-    .read()
-    .ch_cmd
-    .0
-    .send(ShortRecordChannel::Close)?;
+  get_recorder().ch_cmd.send(ShortRecordChannel::Close);
   Ok(())
 }
 
 pub fn start() -> Result<()> {
-  if get_recorder().read().recording {
+  if is_recording() {
     return Ok(());
   }
   println!("short::start");
-  get_recorder()
-    .read()
-    .ch_cmd
-    .0
-    .send(ShortRecordChannel::Start)?;
+  get_recorder().ch_cmd.send(ShortRecordChannel::Start);
   Ok(())
 }
 
 pub fn stop() -> Result<Vec<i16>> {
-  if !get_recorder().read().recording {
+  if !is_recording() {
     return Ok(vec![]);
   }
   println!("short::stop");
-  get_recorder()
-    .read()
-    .ch_cmd
-    .0
-    .send(ShortRecordChannel::Stop)?;
+  get_recorder().ch_cmd.send(ShortRecordChannel::Stop);
 
-  // println!("short::stop sent");
   let final_data = get_recorder()
-    .read()
     .ch_data
-    .1
     .recv_timeout(Duration::from_secs(5))?;
 
   Ok(final_data)
-
-  // loop {
-  //   match get_recorder().read().ch_data.1.try_recv() {
-  //     Ok(d) => {
-  //       return Ok(d);
-  //     }
-  //     Err(e) => {
-  //       if e.is_empty() {
-  //         continue;
-  //       }
-  //       return Err(anyhow!("recv error"));
-  //     }
-  //   }
-  // }
 }
 
 fn run<F>(device: &cpal::Device, config: &cpal::SupportedStreamConfig) -> Result<cpal::Stream>
@@ -225,16 +201,13 @@ where
   f32: FromSample<F>,
 {
   let channel = config.clone().channels();
-  let rec = get_recorder().clone();
   Ok(device.build_input_stream(
     &config.clone().into(),
     move |data: &[F], _: &_| {
-      if rec.read().recording {
-        let rec = rec.read();
+      if is_recording() {
+        let rec = get_recorder();
         let mut buf = rec.buffer.write();
-        if let Some(mut buffer) = buf.as_mut() {
-          write_data(data, &mut buffer, channel);
-        }
+        write_data(data, &mut buf, channel);
       }
     },
     |e| println!("input stream fail: {}", e),

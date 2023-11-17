@@ -2,8 +2,6 @@ import { AudioManager } from "./audio";
 import { useRef } from "react";
 import { S_DESTROY, S_INIT, Service } from "./base";
 
-console.log("service.ts");
-
 const ServiceConfig = {
   audio: new AudioManager(),
 };

@@ -67,10 +67,14 @@ export class AudioManager extends Service {
 
   stopASR = async () => {
     if (this.capturing && this.recording) {
-      this.invoke("stop_asr", {
-        appId: "45KqS2ZhFlq6F9Sp",
-        token: "05e133aacb21478d8767f726ddb7c983",
-      });
+      try {
+        return this.invoke<string>("stop_asr", {
+          appId: "45KqS2ZhFlq6F9Sp",
+          token: "d6d62ae9f90c4b34944708daf2f37e67",
+        });
+      } catch (error) {
+        return `${error}`;
+      }
     }
   };
 

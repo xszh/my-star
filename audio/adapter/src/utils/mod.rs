@@ -1,31 +1,44 @@
-use std::{sync::Arc};
+use std::{sync::Arc, time::Duration};
 
-use parking_lot::Mutex;
-use tokio::sync::mpsc::{
-  UnboundedSender,
-  UnboundedReceiver,
-  unbounded_channel,
-};
+use crossbeam::channel::{unbounded, Receiver, RecvTimeoutError, Sender, TryRecvError};
+use parking_lot::{Mutex, RwLock};
 
-pub struct TokioUnbounded<T> {
-  pub tx: Arc<Mutex<UnboundedSender<T>>>,
-  pub rx: Arc<Mutex<UnboundedReceiver<T>>>,
+pub struct UBChannel<T> {
+  pub tx: Arc<Mutex<Sender<T>>>,
+  pub rx: Receiver<T>,
 }
 
-impl<T> TokioUnbounded<T> {
+impl<T> UBChannel<T> {
   pub fn new() -> Self {
-    let (tx, rx) = unbounded_channel::<T>();
-    TokioUnbounded { tx: Arc::new(Mutex::new(tx)), rx: Arc::new(Mutex::new(rx)) }
+    let (tx, rx) = unbounded::<T>();
+    Self {
+      tx: Arc::new(Mutex::new(tx)),
+      rx: rx,
+    }
   }
 
-  pub fn send(&self, payload: T) {
-    let tx = self.tx.clone();
-    if let Err(e) = tx.lock().send(payload) {
-      eprintln!("send data fail: {}", e);
-    };
+  pub fn share_tx(&self) -> Arc<Mutex<Sender<T>>> {
+    self.tx.clone()
   }
 
-  pub async fn wait(&self) -> Option<T> {
-    self.rx.clone().lock().recv().await
+  pub fn send(&self, msg: T) {
+    if let Err(e) = self.tx.lock().send(msg) {
+      eprintln!("send fail: {}", e);
+    }
+  }
+
+  pub fn recv(&self) {
+    if let Err(e) = self.rx.recv() {
+      eprintln!("recv fail: {}", e);
+    }
+  }
+
+  pub fn try_recv(&self) -> Result<T, TryRecvError> {
+    self.rx.try_recv()
+  }
+
+  pub fn recv_timeout(&self, duration: Duration) -> Result<T, RecvTimeoutError> {
+    self.rx.recv_timeout(duration)
   }
 }
+

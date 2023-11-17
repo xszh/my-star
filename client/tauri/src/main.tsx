@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { App } from "./App.tsx";
 import { observer } from "mobx-react";
 import "./index.less";
+import './assets/iconfont.js';
 
 const Root = observer(function Root() {
   return (
