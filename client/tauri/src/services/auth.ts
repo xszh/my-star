@@ -50,9 +50,7 @@ export class AuthService extends Service {
       });
     });
   }
-  destroy(): void {
-    throw new Error("Method not implemented.");
-  }
+  destroy(): void {}
 
   constructor() {
     super();
