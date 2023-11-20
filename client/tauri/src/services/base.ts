@@ -1,8 +1,9 @@
 import { event, invoke } from "@tauri-apps/api";
 import { Disposer } from "../utils/disposer";
-import { reaction } from "mobx";
+import { computed, reaction } from "mobx";
 import { EventCallback, EventName } from "@tauri-apps/api/event";
 import { InvokeArgs } from "@tauri-apps/api/tauri";
+import { ServiceManager } from "@services";
 
 export const S_INIT = Symbol("init");
 export const S_DESTROY = Symbol("destroy");
@@ -17,6 +18,10 @@ export abstract class Service {
   private [S_DESTROY]() {
     this.destroy();
     this.disposer.dispose();
+  }
+
+  get context() {
+    return ServiceManager;
   }
 
   private disposer = new Disposer();
@@ -41,7 +46,7 @@ export abstract class Service {
       throw error;
     }
   };
-  reaction = (...args: Parameters<typeof reaction>) => {
-    this.disposer.add(reaction(...args));
+  reaction = <T>(...args: Parameters<typeof reaction<T, boolean>>) => {
+    this.disposer.add(reaction<T, boolean>(...args));
   };
 }

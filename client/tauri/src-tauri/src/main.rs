@@ -49,11 +49,13 @@ async fn stop_asr(app: tauri::AppHandle, token: String, app_id: String) -> Resul
 }
 
 #[tauri::command]
-async fn get_mac_address() -> Result<String, String> {
+async fn get_device_id() -> Result<String, String> {
   use mac_address;
   let m_a = mac_address::get_mac_address().map_err(|e| e.to_string())?;
-  let m_a = m_a.ok_or("no mac address".to_string())?;
-  Ok(m_a.to_string())
+  let m_a = m_a.ok_or("no mac address".to_string())?.to_string();
+  let did = md5::compute(m_a);
+  let did = format!("{:x}", did);
+  Ok(did)
 }
 
 fn main() {
@@ -67,7 +69,7 @@ fn main() {
       stop_asr,
       audio_open,
       audio_close,
-      get_mac_address
+      get_device_id
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
