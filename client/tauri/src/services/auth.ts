@@ -40,14 +40,24 @@ export async function getToken() {
 
 export class AuthService extends Service {
   @observable private mToken: string = "";
+  @observable private mMacAddr: string = "";
   @computed get token() {
     return this.mToken;
   }
   init(): void {
+    this.reaction(() => this.mMacAddr, () => {
+      if (this.mMacAddr) {
+      }
+    });
     getToken().then((t) => {
       runInAction(() => {
         this.mToken = t;
       });
+    });
+    this.invoke<string>("get_mac_address").then(macAddr => {
+      runInAction(() => {
+        this.mMacAddr = macAddr;
+      })
     });
   }
   destroy(): void {}

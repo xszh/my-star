@@ -2,13 +2,6 @@ import { useEffect } from "react";
 import { Button } from "../button";
 
 export const Test: React.FC = function Test() {
-  useEffect(() => {
-    console.log(1);
-    return () => {
-      console.log(2);
-    };
-  }, []);
-
   return (
     <div>
       <div>Test</div>

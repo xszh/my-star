@@ -48,6 +48,14 @@ async fn stop_asr(app: tauri::AppHandle, token: String, app_id: String) -> Resul
     .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn get_mac_address() -> Result<String, String> {
+  use mac_address;
+  let m_a = mac_address::get_mac_address().map_err(|e| e.to_string())?;
+  let m_a = m_a.ok_or("no mac address".to_string())?;
+  Ok(m_a.to_string())
+}
+
 fn main() {
   tauri::Builder::default()
     .invoke_handler(tauri::generate_handler![
@@ -58,7 +66,8 @@ fn main() {
       start_asr,
       stop_asr,
       audio_open,
-      audio_close
+      audio_close,
+      get_mac_address
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
