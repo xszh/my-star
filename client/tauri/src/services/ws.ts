@@ -3,161 +3,175 @@ import {
   computed,
   makeObservable,
   observable,
-  reaction,
   runInAction,
 } from "mobx";
 import { Service } from "./base";
+import { Promiser } from "../utils/promise";
 
-export enum WSCommand {
-  Connect,
-  Disconnect,
-  Ping,
-  Pong,
-}
+const HEARTBEAT_INTERVAL = 60_000;
 
-export type WSDataMap = {
-  [WSCommand.Connect]: {
-    deviceId: string;
-  };
-  [WSCommand.Disconnect]: {};
-  [WSCommand.Ping]: {};
-  [WSCommand.Pong]: {};
-};
 
-export interface WSHeader {
-  deviceId: string;
-}
+class WSClient {
+  @observable connected = false;
+  private ws: WebSocket = new WebSocket("wss://www.miemie.tech/mystar/ws/");
 
-export interface WSData<C extends WSCommand> {
-  command: C;
-  data: WSDataMap[C];
+  private connectPromiser = new Promiser<void>();
+  connect = async () => {
+    if (this.ws.readyState === WebSocket.OPEN) {
+      return;
+    }
+    if (this.ws.readyState === WebSocket.CONNECTING) {
+      return this.connectPromiser.tryWait(1000);
+    }
+    throw new Error("WebSocket Closing or Closed");
+  }
+
+  private disconnectPromiser = new Promiser<void>();
+  disconnect = async (code?: number, reason?: string) => {
+    runInAction(() => {
+      this.connected = false;
+    });
+    if (this.ws.readyState < 2) {
+      this.ws.close(code, reason);
+    }
+    await this.disconnectPromiser.tryWait(1000);
+    this.dispose();
+  }
+
+  send = (...data: Parameters<WebSocket['send']>) => {
+    if (this.connected) {
+      this.ws.send(...data);
+    }
+  }
+
+  private pingTimer?: number;
+  constructor() {
+    this.ws.onopen = () => {
+      this.connectPromiser.resolve();
+      runInAction(() => {
+        this.connected = true;
+      })
+    }
+    this.ws.onclose = () => {
+      runInAction(() => {
+        this.connected = false;
+      });
+      this.disconnectPromiser.resolve();
+      this.disconnect();
+    }
+    this.ws.onerror = (err) => {
+      const errMsg = `ws error ${err}`;
+      this.disconnect(500, errMsg);
+    }
+    this.pingTimer = window.setInterval(() => {
+      const now = new Date().getTime();
+      if (this.lastPing && now - this.lastPing >= 5000) {
+        this.disconnectPromiser.reject("heartbeat stop");
+        this.disconnect(500, "heartbeat stop");
+      }
+    }, HEARTBEAT_INTERVAL);
+    this.ws.onmessage = this.handleMessage;
+    makeObservable(this);
+  }
+
+  onMessage?: (payload: any) => void;
+  private lastPing?: number;
+  private handleMessage = (ev: MessageEvent<any>) => {
+    const data = ev.data.toString();
+    if (data === 'ping') {
+      console.info("incoming ping");
+      this.lastPing = new Date().getTime();
+    } else {
+      try {
+        const payload = JSON.parse(data);
+        if (!payload) return;
+        this.onMessage?.(payload);
+      } catch (error) {
+        console.error("incoming invalid message", ev.data);
+      }
+    }
+  }
+
+  private dispose() {
+    window.clearInterval(this.pingTimer);
+  }
 }
 
 export class WSService extends Service {
-  private retryTimer?: number;
-
+  init(): void {
+    this.reaction(() => this.connected, this.handleConnected, {
+      fireImmediately: true,
+    });
+  }
+  destroy(): void {
+  }
   @computed get did() {
     return this.context.get("auth").deviceId;
   }
-  @observable private wss?: WebSocket;
-  init(): void {
-    this.reaction<{
-      connected: boolean;
-      did: string;
-    }>(
-      () => ({
-        connected: this.connected,
-        did: this.did,
-      }),
-      () => {
-        this.retry();
-      },
-      {
-        fireImmediately: true,
-        equals: (a, b) => {
-          return a.connected === b.connected && a.did === b.did;
-        },
-      }
-    );
 
-    this.reaction(
-      () => this.connected,
-      () => {},
-      { fireImmediately: true }
-    );
-  }
-  destroy(): void {
-    this.clearClient();
-    window.clearInterval(this.retryTimer);
+  @observable private wsClient?: WSClient;
+
+  @computed get connected() {
+    return this.wsClient?.connected ?? false;
   }
 
-  private retry = () => {
-    window.clearTimeout(this.retryTimer);
-    this.clearClient();
-    if (!this.connected && this.did) {
-      this.bindClient();
-      this.retryTimer = window.setTimeout(() => {
-        this.retry();
+  @action
+  newClient = () => {
+    this.wsClient = new WSClient();
+    this.wsClient.onMessage = this.handleMessage;
+    return this.wsClient;
+  }
+  
+  connect = async () => {
+    if (!this.did) {
+      throw new Error(`invalid device id ${this.did}`);
+    }
+    this.wsClient?.disconnect().catch((e) => {
+      console.error("disconnect failed", e);
+    });
+    return this.newClient().connect();
+  }
+
+  disconnect = async () => {
+    return this.wsClient?.disconnect();
+  }
+
+  private genHeader = () => {
+    return {
+      deviceId: this.did
+    }
+  }
+
+  send = (data: any) => {
+    this.wsClient?.send(JSON.stringify(data))
+  }
+
+  private connectTimer?: number;
+  handleConnected = () => {
+    window.clearTimeout(this.connectTimer);
+    if (this.connected) {
+      this.send({
+        command: 0,
+        header: this.genHeader(),
+      });
+    } else {
+      this.startConnect();
+    }
+  }
+
+  startConnect = async () => {
+    try {
+      await this.connect()
+    } catch (error) {
+      this.connectTimer = window.setTimeout(() => {
+        this.startConnect();
       }, 1000);
     }
-  };
+  }
 
-  bindClient = () => {
-    this.wss = new WebSocket("wss://www.miemie.tech/mystar/ws/");
-    this.on("open", this.handleOpen);
-    this.on("close", this.handleClose);
-    this.on("message", this.handleMessage);
-    this.on("error", this.handleError);
-  };
-
-  clearClient = () => {
-    this.off("open", this.handleOpen);
-    this.off("close", this.handleClose);
-    this.off("message", this.handleMessage);
-    this.off("error", this.handleError);
-  };
-
-  readonly on = <K extends keyof WebSocketEventMap>(
-    type: K,
-    listener: (this: WebSocket, ev: WebSocketEventMap[K]) => any,
-    options?: boolean | AddEventListenerOptions
-  ) => {
-    this.wss?.addEventListener(type, listener, options);
-  };
-
-  readonly off = <K extends keyof WebSocketEventMap>(
-    type: K,
-    listener: (this: WebSocket, ev: WebSocketEventMap[K]) => any,
-    options?: boolean | EventListenerOptions
-  ) => {
-    this.wss?.removeEventListener(type, listener, options);
-  };
-
-  send = <C extends WSCommand>(command: C, data: WSDataMap[C]) => {
-    const header: WSHeader = {
-      deviceId: this.did,
-    };
-    this.wss?.send(
-      JSON.stringify({
-        command,
-        header,
-        data,
-      })
-    );
-  };
-
-  @observable connected = false;
-
-  @action
-  handleOpen = () => {
-    console.log("connect to wss");
-    this.connected = true;
-    this.send(WSCommand.Connect, {
-      deviceId: this.context.get("auth").deviceId,
-    });
-  };
-
-  @action
-  handleClose = () => {
-    this.connected = false;
-    console.log("close wss");
-  };
-
-  @action
-  handleMessage = (msg: MessageEvent) => {
-    try {
-      const payload = JSON.parse(msg.data);
-      console.log(payload);
-    } catch (error) {
-      console.error("parse message fail", error);
-    }
-  };
-
-  @action
-  handleError = (event: WebSocketEventMap["error"]) => {
-    console.error("wss error", event);
-    this.connected = false;
-  };
+  handleMessage = (payload: any) => {
+    console.log(payload);
+  }
 
   constructor() {
     super();

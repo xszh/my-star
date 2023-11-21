@@ -1,30 +1,23 @@
-import { useEffect } from "react";
+import { observer } from "mobx-react";
 import { Button } from "../button";
+import { useService } from "@services";
 
-export const Test: React.FC = function Test() {
+export const Test: React.FC = observer(function Test() {
+  const { connect, disconnect, connected } = useService().get("ws");
   return (
     <div>
       <div>Test</div>
       <Button
         onClick={() => {
           try {
-            const socket = new WebSocket("wss://www.miemie.tech/mystar/ws/");
-            // Connection opened
-            socket.addEventListener("open", (event) => {
-              socket.send("Hello Server!");
-            });
-
-            // Listen for messages
-            socket.addEventListener("message", (event) => {
-              console.log("Message from server ", event.data);
-            });
+            connected ? disconnect() : connect();
           } catch (error) {
             console.error(error);
           }
         }}
       >
-        Connect WS
+        {`${connected ? 'Disconnect' : 'Connect'} WS`}
       </Button>
     </div>
   );
-};
+});
