@@ -3,6 +3,16 @@
 #![feature(lazy_cell)]
 #![feature(async_closure)]
 
+use std::time::Duration;
+
+use log::{info, error};
+use mystar_core::{
+  logger::init_log,
+  net::{WSMessage, WSClientCtrl},
+};
+use tauri::Manager;
+use tokio::sync::{broadcast, mpsc::unbounded_channel};
+
 mod asr;
 mod audio;
 
@@ -59,7 +69,55 @@ async fn get_device_id() -> Result<String, String> {
 }
 
 fn main() {
+  init_log("./log/tauri-{}.log").unwrap();
+
   tauri::Builder::default()
+    .setup(|app| {
+      let (tx_cmd, rx_cmd) = unbounded_channel::<WSClientCtrl>();
+      let (tx_msg, mut rx_msg) = broadcast::channel::<Message>(16);
+
+      let handle = app.handle();
+
+      tauri::async_runtime::spawn(async move {
+        tokio::spawn(mystar_core::net::run(
+          "wss://www.miemie.tech/mystar/ws/",
+          rx_cmd,
+          tx_msg,
+          Duration::from_secs(5),
+          None,
+        ));
+
+        tokio::spawn(async move {
+          let handle_msg = |msg: WSMessage| {
+            match msg {
+              WSMessage::Text(text) => {
+                if let Err(e) = handle.emit_all("ws_text", text) {
+                  error!("emit all failed: {}", e);
+                }
+              },
+              WSMessage::Binary(bin) => {
+                if let Err(e) = handle.emit_all("ws_text", bin) {
+                  error!("emit all failed: {}", e);
+                }
+              },
+              WSMessage::Close() => {
+                info!("receive close");
+              },
+              WSMessage::Open() => {
+
+              }
+            }
+          };
+          loop {
+            tokio::select! {
+              Ok(msg) = rx_msg.recv() => handle_msg(msg)
+            }
+          }
+        })
+      });
+
+      Ok(())
+    })
     .invoke_handler(tauri::generate_handler![
       is_recording,
       is_capturing,

@@ -4,6 +4,8 @@ use crate::audio::{start_record, stop_record};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use log::warn;
+
 pub(crate) async fn start_asr(app: tauri::AppHandle) -> Result<()> {
   start_record(app).await
 }
@@ -24,7 +26,7 @@ where
   let buffer = stop_record(app)?;
 
   if buffer.is_empty() {
-    println!("asr buffer is empty");
+    warn!("asr buffer is empty");
     return Ok("".into());
   }
 

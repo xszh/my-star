@@ -155,7 +155,7 @@ export class WSService extends Service {
         header: this.genHeader(),
       });
     } else {
-      this.startConnect();
+      // this.startConnect();
     }
   }
 

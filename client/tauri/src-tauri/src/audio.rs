@@ -63,7 +63,6 @@ pub(crate) fn stop_record(app: tauri::AppHandle) -> Result<Vec<u8>> {
   }
 
   let data = short::stop()?;
-  println!("data len: {}", data.len());
   set_recording(false, app)?;
   Ok(data.iter().flat_map(|d| d.to_le_bytes()).collect())
 }
