@@ -29,7 +29,7 @@ impl WSClient {
     loop {
       if let Ok((ws_stream, _)) = connect_async(option.url.clone()).await {
         let (sink, stream) = ws_stream.split();
-        let sink_channel = broadcast::channel::<Message>(128);
+        let () = broadcast::channel::<Message>(128);
       }
 
       retry_cnt += 1;
