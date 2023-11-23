@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use mystar_core::{
   logger::init_log,
-  net::{run, WSClientCtrl, WSMessage},
+  net::{run, WSClientCtrl, WSClientHeader, WSMessage},
 };
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::unbounded_channel;
@@ -20,6 +20,11 @@ async fn main() -> anyhow::Result<()> {
     "wss://www.miemie.tech/mystar/ws/",
     rx_cmd,
     tx_msg,
+    || {
+      return WSClientHeader {
+        token: "test_main".into(),
+      };
+    },
     Duration::from_secs(1),
     None,
   ));
@@ -30,18 +35,7 @@ async fn main() -> anyhow::Result<()> {
     }
   });
 
-
-  let tx_cmd2 = tx_cmd.clone();
-  tokio::spawn(async move {
-    loop {
-      if let Err(e) = tx_cmd2.send(WSClientCtrl::SendText("hello".into())) {
-        break;
-      }
-      tokio::time::sleep(Duration::from_secs(2)).await;
-    }
-  });
-
-  tokio::time::sleep(Duration::from_secs(30)).await;
+  tokio::time::sleep(Duration::from_secs(60)).await;
   tx_cmd.send(WSClientCtrl::Exit).unwrap();
 
   tokio::time::sleep(Duration::from_secs(3)).await;
