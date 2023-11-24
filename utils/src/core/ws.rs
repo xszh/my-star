@@ -1,37 +1,36 @@
 use std::{
-  net::TcpStream,
+  fmt::Display,
   time::{Duration, Instant},
 };
 
 use anyhow::{anyhow, Result};
 
-use erased_serde::{Deserializer, Serialize};
 use futures_util::StreamExt;
 use serde::de::DeserializeOwned;
+use serde::Serialize;
 use tokio::sync::{
   broadcast,
   mpsc::{self, Sender},
 };
 use tokio_stream::wrappers::ReceiverStream;
-use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use log::{error, info, warn};
 
 pub struct WSOption {
-  url: String,
-  close_after: Duration,
-  retry_interval: Duration,
-  retry_max_count: Option<u32>,
+  pub url: String,
+  pub close_after: Duration,
+  pub retry_interval: Duration,
+  pub retry_max_count: Option<u32>,
 }
 
-pub struct WSClient {
-  transformer: Option<Box<dyn WSTransform>>,
+#[derive(Clone)]
+pub struct WSClient<T> {
+  transformer: Option<T>,
   emitter: Option<Sender<Message>>,
   handler: broadcast::Sender<EventMessage>,
   last_ping: Instant,
 }
-
-type WSStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 enum LoopFlow {
   Break,
@@ -39,12 +38,80 @@ enum LoopFlow {
 }
 
 #[derive(Clone, Debug)]
-enum EventMessage {
+pub enum EventMessage {
+  Open(),
+  Close(),
   Text(String),
   Binary(Vec<u8>),
 }
 
-impl WSClient {
+impl<T> WSClient<T>
+where
+  T: WSTransform,
+{
+  pub fn transform(&mut self, t: T) {
+    self.transformer = Some(t);
+  }
+
+  pub async fn send<D: Serialize + Display>(&self, data: D) -> Result<()> {
+    let emitter = self.emitter.clone().ok_or(anyhow!("no emitter know"))?;
+    if let Some(ts) = &self.transformer {
+      if let Ok(text) = ts.to_str(data) {
+        emitter.send(Message::Text(text)).await?;
+      }
+    } else {
+      emitter
+        .send(Message::Text(serde_json::to_string(&data)?))
+        .await?;
+    }
+    Ok(())
+  }
+
+  pub async fn inner_recv<O>(&self, rcv: &mut broadcast::Receiver<EventMessage>) -> Result<O>
+  where
+    O: DeserializeOwned + Display,
+  {
+    Ok(match rcv.recv().await? {
+      EventMessage::Text(text) => {
+        if let Some(ts) = &self.transformer {
+          ts.from_str::<O>(&text)?
+        } else {
+          serde_json::from_str::<O>(&text)?
+        }
+      }
+      EventMessage::Binary(bin) => {
+        if let Some(ts) = &self.transformer {
+          ts.from_slice(&bin)?
+        } else {
+          serde_json::from_slice::<O>(&bin)?
+        }
+      }
+      EventMessage::Open() => {
+        if let Some(ts) = &self.transformer {
+          ts.on_open()?
+        } else {
+          serde_json::from_value::<O>(serde_json::Value::Null)?
+        }
+      }
+      EventMessage::Close() => {
+        if let Some(ts) = &self.transformer {
+          ts.on_close()?
+        } else {
+          serde_json::from_value::<O>(serde_json::Value::Null)?
+        }
+      }
+    })
+  }
+
+  pub async fn recv<O>(&self) -> Result<T>
+  where
+    T: DeserializeOwned + Display,
+  {
+    self.inner_recv(&mut self.handler.subscribe()).await
+  }
+}
+
+impl<T> WSClient<T> {
   pub fn new() -> Self {
     let (handler, _) = broadcast::channel::<EventMessage>(128);
     Self {
@@ -54,8 +121,9 @@ impl WSClient {
       last_ping: Instant::now(),
     }
   }
-  pub fn transform(&mut self, t: Box<dyn WSTransform>) {
-    self.transformer = Some(t);
+
+  pub fn subscribe(&self) -> broadcast::Receiver<EventMessage> {
+    self.handler.subscribe()
   }
 
   fn handle_stream_message(&mut self, message: Result<Message>) -> Result<LoopFlow> {
@@ -145,62 +213,31 @@ impl WSClient {
     Ok(())
   }
 
-  pub async fn send(&self, data: Box<dyn Serialize>) -> Result<()> {
-    let emitter = self.emitter.clone().ok_or(anyhow!("no emitter know"))?;
-    if let Some(ts) = &self.transformer {
-      if let Ok(text) = ts.to_str(data) {
-        emitter.send(Message::Text(text)).await?;
-      }
-    } else {
-      emitter
-        .send(Message::Text(serde_json::to_string(&data)?))
-        .await?;
-    }
-    Ok(())
-  }
-
   pub async fn close(&self) -> Result<()> {
     let emitter = self.emitter.clone().ok_or(anyhow!("no emitter know"))?;
     emitter.send(Message::Close(None)).await?;
     Ok(())
   }
-
-  pub async fn recv<F, T>(&self, cb: F) -> Result<()>
-  where
-    T: DeserializeOwned,
-    F: Fn(T) -> (),
-  {
-    let mut rcv = self.handler.subscribe();
-    while let Ok(msg) = rcv.recv().await {
-      match msg {
-        EventMessage::Text(text) => {
-          if let Some(ts) = &self.transformer {
-            let der = &mut ts.from_str(&text);
-            let val = erased_serde::deserialize::<T>(der)?;
-            cb(val);
-          } else {
-            cb(serde_json::from_str::<T>(&text)?);
-          }
-        }
-        EventMessage::Binary(bin) => {
-          if let Some(ts) = &self.transformer {
-            let der = &mut ts.from_slice(&bin);
-            let val = erased_serde::deserialize::<T>(der)?;
-            cb(val);
-          } else {
-            cb(serde_json::from_slice::<T>(&bin)?);
-          }
-        }
-      };
-    }
-    error!("receive error");
-    Ok(())
-  }
 }
 
 pub trait WSTransform {
-  fn to_str(&self, data: Box<dyn Serialize>) -> Result<String>;
-  // fn to_buffer(&self, data: Box<dyn Serialize>) -> Vec<u8>;
-  fn from_str(&self, data: &str) -> Box<dyn Deserializer>;
-  fn from_slice(&self, data: &[u8]) -> Box<dyn Deserializer>;
+  fn to_str<T: Serialize + Display>(&self, data: T) -> Result<String> {
+    Ok(serde_json::to_string::<T>(&data)?)
+  }
+
+  fn from_str<O: serde::de::DeserializeOwned>(&self, data: &str) -> Result<O> {
+    Ok(serde_json::from_str::<O>(data)?)
+  }
+
+  fn from_slice<O: serde::de::DeserializeOwned>(&self, data: &[u8]) -> Result<O> {
+    Ok(serde_json::from_slice::<O>(data)?)
+  }
+
+  fn on_open<O: serde::de::DeserializeOwned + Display>(&self) -> Result<O> {
+    Ok(serde_json::from_value::<O>(serde_json::Value::Null)?)
+  }
+
+  fn on_close<O: serde::de::DeserializeOwned + Display>(&self) -> Result<O> {
+    Ok(serde_json::from_value::<O>(serde_json::Value::Null)?)
+  }
 }

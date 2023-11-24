@@ -522,7 +522,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mystar_core"
+name = "mystar"
 version = "0.1.0"
 dependencies = [
  "anyhow",
