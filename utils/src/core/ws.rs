@@ -1,11 +1,14 @@
+use core::slice;
 use std::{
   fmt::Display,
+  sync::Arc,
   time::{Duration, Instant},
 };
 
 use anyhow::{anyhow, Result};
 
 use futures_util::StreamExt;
+use parking_lot::RwLock;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tokio::sync::{
@@ -25,16 +28,16 @@ pub struct WSOption {
 }
 
 #[derive(Clone)]
-pub struct WSClient<T> {
-  transformer: Option<T>,
-  emitter: Option<Sender<Message>>,
+pub struct WSClient<C> {
+  context: Option<C>,
+  emitter: Arc<RwLock<Option<Sender<Message>>>>,
   handler: broadcast::Sender<EventMessage>,
-  last_ping: Instant,
 }
 
 enum LoopFlow {
   Break,
   Continue,
+  Ping,
 }
 
 #[derive(Clone, Debug)]
@@ -45,80 +48,13 @@ pub enum EventMessage {
   Binary(Vec<u8>),
 }
 
-impl<T> WSClient<T>
-where
-  T: WSTransform,
-{
-  pub fn transform(&mut self, t: T) {
-    self.transformer = Some(t);
-  }
-
-  pub async fn send<D: Serialize + Display>(&self, data: D) -> Result<()> {
-    let emitter = self.emitter.clone().ok_or(anyhow!("no emitter know"))?;
-    if let Some(ts) = &self.transformer {
-      if let Ok(text) = ts.to_str(data) {
-        emitter.send(Message::Text(text)).await?;
-      }
-    } else {
-      emitter
-        .send(Message::Text(serde_json::to_string(&data)?))
-        .await?;
-    }
-    Ok(())
-  }
-
-  pub async fn inner_recv<O>(&self, rcv: &mut broadcast::Receiver<EventMessage>) -> Result<O>
-  where
-    O: DeserializeOwned + Display,
-  {
-    Ok(match rcv.recv().await? {
-      EventMessage::Text(text) => {
-        if let Some(ts) = &self.transformer {
-          ts.from_str::<O>(&text)?
-        } else {
-          serde_json::from_str::<O>(&text)?
-        }
-      }
-      EventMessage::Binary(bin) => {
-        if let Some(ts) = &self.transformer {
-          ts.from_slice(&bin)?
-        } else {
-          serde_json::from_slice::<O>(&bin)?
-        }
-      }
-      EventMessage::Open() => {
-        if let Some(ts) = &self.transformer {
-          ts.on_open()?
-        } else {
-          serde_json::from_value::<O>(serde_json::Value::Null)?
-        }
-      }
-      EventMessage::Close() => {
-        if let Some(ts) = &self.transformer {
-          ts.on_close()?
-        } else {
-          serde_json::from_value::<O>(serde_json::Value::Null)?
-        }
-      }
-    })
-  }
-
-  pub async fn recv<O>(&self) -> Result<T>
-  where
-    T: DeserializeOwned + Display,
-  {
-    self.inner_recv(&mut self.handler.subscribe()).await
-  }
-}
-
-impl<T> WSClient<T> {
+impl<C> WSClient<C> {
   pub fn new() -> Self {
     let (handler, _) = broadcast::channel::<EventMessage>(128);
     Self {
-      transformer: None,
-      emitter: None,
+      context: None,
+      emitter: Arc::new(RwLock::new(None)),
       handler,
-      last_ping: Instant::now(),
     }
   }
 
@@ -126,10 +62,10 @@ impl<T> WSClient<T> {
     self.handler.subscribe()
   }
 
-  fn handle_stream_message(&mut self, message: Result<Message>) -> Result<LoopFlow> {
+  fn handle_stream_message(&self, message: Result<Message>) -> Result<LoopFlow> {
     if let Err(e) = message {
       eprintln!("get stream message: {e}");
-      return Ok(LoopFlow::Continue);
+      return Ok(LoopFlow::Break);
     }
     match message.unwrap() {
       Message::Text(text) => {
@@ -144,10 +80,7 @@ impl<T> WSClient<T> {
         info!("receive close, will break");
         Ok(LoopFlow::Break)
       }
-      Message::Ping(_) => {
-        self.last_ping = Instant::now();
-        Ok(LoopFlow::Continue)
-      }
+      Message::Ping(_) => Ok(LoopFlow::Ping),
       msg => {
         info!("receive message: {msg:?}");
         Ok(LoopFlow::Continue)
@@ -155,26 +88,37 @@ impl<T> WSClient<T> {
     }
   }
 
-  pub async fn connect(&mut self, option: &WSOption) -> anyhow::Result<()> {
+  pub async fn connect(&self, option: &WSOption) -> anyhow::Result<()> {
     let mut retry_cnt = 0;
 
     loop {
-      self.emitter = None;
+      *self.emitter.write() = None;
       let mut ping_check_interval = tokio::time::interval(Duration::from_secs(1));
 
+      info!("start connect to {}", option.url);
       if let Ok((ws_stream, _)) = connect_async(option.url.clone()).await {
+        info!("connect success");
+        let mut last_ping = Instant::now();
+
         let (sink, mut stream) = ws_stream.split();
         let (emitter, forwarder) = mpsc::channel::<Message>(128);
-        self.emitter = Some(emitter);
+        *self.emitter.write() = Some(emitter);
         let forwarder_stream: ReceiverStream<Message> = forwarder.into();
         tokio::spawn(forwarder_stream.map(|m| Ok(m)).forward(sink));
 
+        info!("send open");
+        self.handler.send(EventMessage::Open())?;
+        info!("start message recv loog");
         loop {
           tokio::select! {
             Some(msg) = stream.next() => match self.handle_stream_message(msg.map_err(|e| e.into())) {
               Ok(loop_flow) => match loop_flow {
                 LoopFlow::Break => break,
                 LoopFlow::Continue => continue,
+                LoopFlow::Ping => {
+                  last_ping = Instant::now();
+                  continue;
+                }
               },
               Err(e) => {
                 eprintln!("handle stream message error: {e}. will disconnect");
@@ -182,7 +126,7 @@ impl<T> WSClient<T> {
               }
             },
             _ = ping_check_interval.tick() => {
-              let last_ping_elapsed = self.last_ping.elapsed();
+              let last_ping_elapsed = last_ping.elapsed();
               if last_ping_elapsed > option.close_after {
                 warn!("{} since last ping, will exit", last_ping_elapsed.as_secs());
                 break;
@@ -192,13 +136,13 @@ impl<T> WSClient<T> {
         }
       }
 
-      if let Some(emitter) = &self.emitter {
+      if let Some(emitter) = self.emitter.read().as_ref() {
         let _ = emitter
           .send(Message::Close(None))
           .await
           .inspect_err(|e| error!("send close fail: {}", e));
       }
-      self.emitter = None;
+      *self.emitter.write() = None;
       tokio::time::sleep(option.retry_interval).await;
 
       retry_cnt += 1;
@@ -214,30 +158,89 @@ impl<T> WSClient<T> {
   }
 
   pub async fn close(&self) -> Result<()> {
-    let emitter = self.emitter.clone().ok_or(anyhow!("no emitter know"))?;
+    let emitter = self
+      .emitter
+      .read()
+      .clone()
+      .ok_or(anyhow!("no emitter know"))?;
     emitter.send(Message::Close(None)).await?;
     Ok(())
   }
+
+  pub fn context(&mut self, t: C) {
+    self.context = Some(t);
+  }
+
+  pub async fn send<D: WSCell<C>>(&self, data: D) -> Result<()>
+  where
+    D: Serialize,
+  {
+    let emitter = self
+      .emitter
+      .read()
+      .clone()
+      .ok_or(anyhow!("no emitter know"))?;
+    if let Ok(text) = data.to_string(&self.context) {
+      info!("send string: {text}");
+      emitter.send(Message::Text(text)).await?;
+    }
+    Ok(())
+  }
+
+  pub async fn inner_recv<O>(&self, rcv: &mut broadcast::Receiver<EventMessage>) -> Result<O>
+  where
+    O: WSCell<C> + DeserializeOwned,
+  {
+    Ok(match rcv.recv().await? {
+      EventMessage::Text(text) => O::from_str(&text, &self.context)?,
+      EventMessage::Binary(bin) => O::from_slice(&bin, &self.context)?,
+      EventMessage::Open() => O::open_cell(&self.context)?,
+      EventMessage::Close() => O::close_cell(&self.context)?,
+    })
+  }
+
+  pub async fn recv<O>(&self) -> Result<O>
+  where
+    O: WSCell<C> + DeserializeOwned,
+  {
+    self.inner_recv::<O>(&mut self.handler.subscribe()).await
+  }
 }
 
-pub trait WSTransform {
-  fn to_str<T: Serialize + Display>(&self, data: T) -> Result<String> {
-    Ok(serde_json::to_string::<T>(&data)?)
+pub trait WSCell<C> {
+  fn to_string(&self, context: &Option<C>) -> Result<String>
+  where
+    Self: Serialize,
+  {
+    Ok(serde_json::to_string::<Self>(&self)?)
   }
 
-  fn from_str<O: serde::de::DeserializeOwned>(&self, data: &str) -> Result<O> {
-    Ok(serde_json::from_str::<O>(data)?)
+  fn to_vec(&self, context: &Option<C>) -> Result<Vec<u8>>
+  where
+    Self: Serialize,
+  {
+    Ok(serde_json::to_vec::<Self>(&self)?)
   }
 
-  fn from_slice<O: serde::de::DeserializeOwned>(&self, data: &[u8]) -> Result<O> {
-    Ok(serde_json::from_slice::<O>(data)?)
+  fn from_str(str: &str, context: &Option<C>) -> Result<Self>
+  where
+    Self: DeserializeOwned,
+  {
+    Ok(serde_json::from_str::<Self>(str)?)
   }
 
-  fn on_open<O: serde::de::DeserializeOwned + Display>(&self) -> Result<O> {
-    Ok(serde_json::from_value::<O>(serde_json::Value::Null)?)
+  fn from_slice(slice: &[u8], context: &Option<C>) -> Result<Self>
+  where
+    Self: DeserializeOwned,
+  {
+    Ok(serde_json::from_slice::<Self>(slice)?)
   }
 
-  fn on_close<O: serde::de::DeserializeOwned + Display>(&self) -> Result<O> {
-    Ok(serde_json::from_value::<O>(serde_json::Value::Null)?)
-  }
+  fn open_cell(context: &Option<C>) -> Result<Self>
+  where
+    Self: DeserializeOwned;
+
+  fn close_cell(context: &Option<C>) -> Result<Self>
+  where
+    Self: DeserializeOwned;
 }

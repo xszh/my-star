@@ -1,12 +1,5 @@
-use std::time::Duration;
-
-use mystar::{
-  core::logger::init_log,
-  // net::{run, WSClientCtrl, WSClientHeader, WSMessage},
-  impl::admin;
-};
-use tokio::sync::broadcast;
-use tokio::sync::mpsc::unbounded_channel;
+use mystar::admin::{AdminWSCell, AdminWSClient, AdminWSContext};
+use mystar::core::logger::init_log;
 
 use log::info;
 
@@ -14,32 +7,21 @@ use log::info;
 async fn main() -> anyhow::Result<()> {
   init_log("./log/net-{}.log")?;
 
-  let (tx_cmd, rx_cmd) = unbounded_channel::<WSClientCtrl>();
-  let (tx_msg, mut rx_msg) = broadcast::channel::<WSMessage>(16);
+  let mut client = AdminWSClient::init();
 
-  tokio::spawn(run(
-    "wss://www.miemie.tech/mystar/ws/",
-    rx_cmd,
-    tx_msg,
-    || {
-      return WSClientHeader {
-        token: "test_main".into(),
-      };
-    },
-    Duration::from_secs(1),
-    None,
-  ));
+  client
+    .context(AdminWSContext {
+      token: "test_token".into(),
+    })
+    .on(AdminWSCell::Open {}, |client, cell| {
+      info!("receive open");
+      client.emit(AdminWSCell::Open {});
+    })
+    .on(AdminWSCell::Close {}, |client, cell| {
+      info!("receive close");
+    });
 
-  tokio::spawn(async move {
-    while let Ok(msg) = rx_msg.recv().await {
-      info!("message: {msg:?}")
-    }
-  });
-
-  tokio::time::sleep(Duration::from_secs(60)).await;
-  tx_cmd.send(WSClientCtrl::Exit).unwrap();
-
-  tokio::time::sleep(Duration::from_secs(3)).await;
+  client.run().await;
 
   Ok(())
 }

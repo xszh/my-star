@@ -1,83 +1,114 @@
-use std::{fmt::Display, time::Duration};
+use std::{
+  collections::{HashMap, HashSet},
+  fmt::Display,
+  time::Duration,
+};
 
-use crate::core::ws::{self, WSClient, WSOption, WSTransform};
+use crate::core::ws::{WSCell, WSClient, WSOption};
 
 use anyhow::{anyhow, Result};
 
 use log::{error, info, warn};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::Map;
 
 #[derive(Clone)]
-pub struct AdminWSTransform {
-  device_id: String,
+pub struct AdminWSContext {
+  pub token: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AdminWSHeader {
-  device_id: String,
+  token: String,
 }
 
-impl AdminWSTransform {
+impl AdminWSContext {
   fn gen_header(&self) -> AdminWSHeader {
     AdminWSHeader {
-      device_id: self.device_id.clone(),
+      token: self.token.clone(),
     }
   }
 }
 
 #[repr(u32)]
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "command")]
+#[derive(Serialize, Deserialize, Hash, PartialEq, Eq, Clone)]
+#[serde(rename_all = "camelCase")]
 pub enum AdminWSCell {
-  Open { data: () } = 0,
-  Close { data: () } = 1,
+  Open {} = 0,
+  Close {} = 1,
   Test { data: String } = 2,
+}
+
+impl WSCell<AdminWSContext> for AdminWSCell {
+  fn to_string(&self, context: &Option<AdminWSContext>) -> Result<String>
+  where
+    Self: Serialize,
+  {
+    let mut send_data = Map::new();
+    send_data.insert("data".into(), serde_json::to_value(self)?);
+
+    if let Some(context) = context {
+      send_data.insert("header".into(), serde_json::to_value(context.gen_header())?);
+    }
+
+    Ok(serde_json::to_string(&send_data)?)
+  }
+  fn open_cell(_: &Option<AdminWSContext>) -> Result<Self>
+  where
+    Self: DeserializeOwned,
+  {
+    Ok(AdminWSCell::Open {})
+  }
+
+  fn close_cell(_: &Option<AdminWSContext>) -> Result<Self>
+  where
+    Self: DeserializeOwned,
+  {
+    Ok(AdminWSCell::Close {})
+  }
 }
 
 impl Display for AdminWSCell {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
-      AdminWSCell::Open { data: _ } => write!(f, "open()"),
-      AdminWSCell::Close { data: _ } => write!(f, "close()"),
+      AdminWSCell::Open {} => write!(f, "open()"),
+      AdminWSCell::Close {} => write!(f, "close()"),
       AdminWSCell::Test { data } => write!(f, "test({data}: String)"),
     }
   }
 }
 
-impl WSTransform for AdminWSTransform {
-  fn to_str<T>(&self, data: T) -> Result<String>
-  where
-    T: Serialize + Display,
-  {
-    let data_val = data.to_string();
-    let mut value = serde_json::to_value(data)?;
-    let header = serde_json::to_value(self.gen_header())?;
-    let value = value
-      .as_object_mut()
-      .ok_or(anyhow!("{data_val} not an object"))?;
-    value.insert("header".into(), header);
-    Ok(serde_json::to_string(value)?)
-  }
+pub struct AdminWSClient<'s> {
+  ws_client: WSClient<AdminWSContext>,
+  event_map: HashMap<AdminWSCell, Vec<Box<dyn Send + Sync + Fn(&Self, AdminWSCell) -> () + 's>>>,
 }
 
-pub type AdminWSClient = WSClient<AdminWSTransform>;
-
-impl AdminWSClient {
-  pub async fn init() -> Self {
-    let client = Self::new();
-
-    client
+impl<'s> AdminWSClient<'s> {
+  pub fn init() -> Self {
+    Self {
+      ws_client: WSClient::<AdminWSContext>::new(),
+      event_map: HashMap::new(),
+    }
   }
   pub fn emit(&self, cell: AdminWSCell) -> &Self {
-    let client = (*self).clone();
-    tokio::spawn(async move {
-      let cell_str = cell.to_string();
-      if let Err(e) = client.send(cell).await {
-        error!("emit {cell_str} failed: {e}");
-      }
-    });
+    let client = self.ws_client.clone();
+    tokio::spawn(async move { client.send(cell).await });
+    self
+  }
+  pub fn on<'a, F>(&'a mut self, cell: AdminWSCell, cb: F) -> &'a mut Self
+  where
+    F: Send + Sync + Fn(&Self, AdminWSCell) -> () + 's,
+  {
+    self
+      .event_map
+      .entry(cell)
+      .or_insert(vec![])
+      .push(Box::new(cb));
+    self
+  }
+  pub fn context<'a>(&'a mut self, c: AdminWSContext) -> &'a mut Self {
+    self.ws_client.context(c);
     self
   }
   pub async fn run(&mut self) {
@@ -87,8 +118,21 @@ impl AdminWSClient {
       close_after: Duration::from_secs(20),
       retry_max_count: None,
     };
-    if let Err(e) = self.connect(&option).await {
-      error!("disconnect: {e}");
+
+    let ee = &mut self.ws_client.subscribe();
+    tokio::select! {
+      _ = async {
+        while let Ok(msg) = self.ws_client.inner_recv::<AdminWSCell>(ee).await {
+          if let Some(cbs) = self.event_map.get(&msg) {
+            cbs.iter().for_each(|cb| {
+              cb(&self, msg.clone());
+            })
+          }
+        }
+      } => {},
+      Err(e) = self.ws_client.connect(&option) => {
+        error!("disconnect: {e}");
+      },
     }
   }
 }
